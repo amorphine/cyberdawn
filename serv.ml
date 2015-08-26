@@ -1,23 +1,3 @@
-open Lwt
-open Lwt_io
-open Str
-open Array
-
-(*
-#use "topfind";;
-
-#require "lwt.simple-top";;
-
-#require "str";;
-
-open Lwt;;
-
-open Str;;
-
-*)
-
-
-
 type token  = |X |O |EMPTY
 	
 type game_state = |WIN of token |DRAW |CONTINUE
@@ -28,9 +8,10 @@ let token_to_str token =
 	| X -> "X"
 	| O -> "O"
 
-let empty_board = 
-	let row = [|EMPTY; EMPTY; EMPTY|] in
-	Array.make 3 row				
+let empty_board n =
+	Array.make 3 [|EMPTY; EMPTY; EMPTY|]	
+	
+let border = String.make 70 '#'
 
 let read_from_client client= 
 	client >>= fun cli ->
@@ -72,7 +53,7 @@ let setting_up_server_socket =
 
 
 let ask_to_wait player = 
-	send_to_client player "Your opponent turn. Please, wait";
+	send_to_client player "Your opponent turn. Please, wait" |> ignore;
 	()
 
 let check_if_correct str board = 
@@ -93,28 +74,26 @@ let check_if_correct str board =
 					else false
 		| _ -> false		
 
-let make_move x y board token=
-	 board.(y).(x) <- token;
-	 board
+let make_move x y board token =
+	let private_board = Array.map (Array.copy) board in
+	 private_board.(y).(x) <- token;
+	 private_board
 
-let rec ask_for_move player board =
-	player >>= fun (descriptor, token) ->
-	send_to_client descriptor "Your move: ";
-	send_board_to_player descriptor board;
-	let move = read_from_client descriptor in 
+let rec ask_for_move player token board =
+	send_to_client player "Your move: " |> ignore;
+	send_board_to_player player board;
+	let move = read_from_client player in 
 		move >>= fun str ->
 		match (check_if_correct str board) with
 		|false ->
-				send_to_client descriptor "Wrong move. Try again (F.e TURN 1 2)";
-				ask_for_move player board;
+				send_to_client player "Wrong move. Try again (F.e TURN 1 2)" |> ignore;
+				ask_for_move player token board;
 		|true ->
 				match  Str.split (Str.regexp " ") str with
 						|hd :: arg1 :: arg2 :: [] ->
 						let x = int_of_string arg1 in
 						let y = int_of_string arg2 in
-				let updated_board = 
-					make_move x y board token in 
-				Lwt.return updated_board
+					Lwt.return(make_move x y board token)
 
 let there_are_empty_cells board =
 	let is_empty cell =
@@ -162,17 +141,23 @@ let final_game player1 player2 game_state board=
 		Lwt.return () in
 	match game_state with
 	| WIN X |WIN O ->
-  	send_to_client player1 "You won!";
-  	send_to_client player2 "You lost!";
+		send_board_to_player player1 board;
+  	send_to_client player1 "You won!" |> ignore;
+		send_board_to_player player2 board;
+  	send_to_client player2 "You lost!" |> ignore;		
 		close_channel player1;
 		close_channel player2
 	|DRAW -> 
-		send_to_client player1 "DRAW! THANKS FOR THE GAME!";
-		send_to_client player2 "DRAW! THANKS FOR THE GAME!";
+		send_board_to_player player1 board;
+		send_board_to_player player2 board;
+		send_to_client player1 "DRAW! THANKS FOR THE GAME!" |> ignore;
+		send_to_client player2 "DRAW! THANKS FOR THE GAME!" |> ignore;
 		close_channel player1;
 		close_channel player2
 
 let rec game_loop player1 player2 board = 
+	send_to_client player1 border;
+	send_to_client player2 border;
 	match check_win board with
 	|WIN X ->
 		final_game player1 player2 (WIN X) board;
@@ -182,18 +167,20 @@ let rec game_loop player1 player2 board =
 		let is_empty cell =
 			match cell with EMPTY -> true | _ -> false in
 		let listed = Array.to_list (Array.map Array.to_list board) in
-		let current_player = 
+		let current_player, token = 
 				if ((List.length (List.filter is_empty (List.flatten listed))) mod 2) = 1 
 					then 
 						(ask_to_wait player2;
-						Lwt.return (player1, X))						
+						send_board_to_player player2 board;
+						player1, X)						
 					else
 						(ask_to_wait player1;
-						Lwt.return (player2, O)) in		
-		let after_turn_board = ask_for_move current_player board in
-		after_turn_board>>= fun at_board ->
-		game_loop player1 player2 at_board
-		
+						send_board_to_player player1 board;
+						 player2, O) in		
+		let updated_board = ask_for_move current_player token board in
+		updated_board >>= fun brd ->
+		game_loop player1 player2 brd;
+		Lwt.return()
 		|DRAW -> final_game player1 player2 DRAW board		
 
 let waiting_players = 
@@ -201,9 +188,9 @@ let waiting_players =
 	
 let prepare_game_process pair_of_players= 
 	pair_of_players >>= fun (player1, player2) ->	
-	send_to_client player1 "You play for X";
-	send_to_client player2 "You play for O";
-	game_loop player1 player2 empty_board
+	send_to_client player1 "You play for X" |>ignore ;
+	send_to_client player2 "You play for O" |>ignore ;
+	game_loop player1 player2 (empty_board 3)
 
 let rec form_pairs () = 
 	let player1 = Lwt_mvar.take waiting_players in 
@@ -233,6 +220,6 @@ let rec handle_income () =
 	make_ready player;
 	handle_income () 
 
-let _ = 
+let _ = Lwt_main.run (
 	form_pairs ();
-	handle_income ();;
+	handle_income ());;
