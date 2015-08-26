@@ -16,23 +16,21 @@ open Str;;
 
 *)
 
+
+
 type token  = |X |O |EMPTY
 	
 type game_state = |WIN of token |DRAW |CONTINUE
-	
-let empty_board = [|
-					[|EMPTY; EMPTY; EMPTY|];
-					[|EMPTY; EMPTY; EMPTY|];
-					[|EMPTY; EMPTY; EMPTY|]|]					
 
-let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0
+let token_to_str token = 
+	match token with 
+	| EMPTY -> " "
+	| X -> "X"
+	| O -> "O"
 
-let setting_up_server_socket = 	
-	let sockaddr = (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", 23233)) in
-	Lwt_unix.set_close_on_exec sock;
-	Lwt_unix.setsockopt sock Unix.SO_REUSEADDR true;
-	Lwt_unix.bind sock sockaddr;
-	Lwt_unix.listen sock 20
+let empty_board = 
+	let row = [|EMPTY; EMPTY; EMPTY|] in
+	Array.make 3 row				
 
 let read_from_client client= 
 	client >>= fun cli ->
@@ -44,6 +42,34 @@ let send_to_client client msg=
 	let chan = Lwt_io.(of_fd ~mode:output cli) in
 	Lwt_io.fprintf chan "SERVER MESSAGE: %s\n" msg;
 	Lwt_io.flush chan
+
+let board_to_str board = 
+	let listed = Array.to_list (Array.map Array.to_list board) in
+	let header = "\n   0   1   2	\n"	in
+	let separator = "  ---+---+---\n" in 	
+	let row_to_str lst = 
+		 String.concat " | " (List.map token_to_str lst) ^ "\n" in
+	let rec form_string start_with lst =
+		match lst with 
+		| [] -> ""
+		| hd :: tl -> 
+			separator ^ string_of_int start_with ^ "  " ^ 
+									(row_to_str hd) ^ form_string (start_with+1) tl in
+	header ^ (form_string 0 listed)
+	
+let send_board_to_player player board =
+	 let str = board_to_str board in 
+		send_to_client player str
+
+let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0
+
+let setting_up_server_socket = 	
+	let sockaddr = (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", 23233)) in
+	Lwt_unix.set_close_on_exec sock;
+	Lwt_unix.setsockopt sock Unix.SO_REUSEADDR true;
+	Lwt_unix.bind sock sockaddr;
+	Lwt_unix.listen sock 20
+
 
 let ask_to_wait player = 
 	send_to_client player "Your opponent turn. Please, wait";
@@ -74,6 +100,7 @@ let make_move x y board token=
 let rec ask_for_move player board =
 	player >>= fun (descriptor, token) ->
 	send_to_client descriptor "Your move: ";
+	send_board_to_player descriptor board;
 	let move = read_from_client descriptor in 
 		move >>= fun str ->
 		match (check_if_correct str board) with
@@ -128,15 +155,15 @@ let check_win board =
 		
 	|	board -> DRAW
 
-let final_game player1 player2 game_state =
+let final_game player1 player2 game_state board=
 	let close_channel chan = 
 		chan >>= fun descriptor ->
 		Lwt_unix.shutdown descriptor SHUTDOWN_ALL;
 		Lwt.return () in
 	match game_state with
 	| WIN X |WIN O ->
-  	send_to_client player1 "You won";
-  	send_to_client player2 "You lost";
+  	send_to_client player1 "You won!";
+  	send_to_client player2 "You lost!";
 		close_channel player1;
 		close_channel player2
 	|DRAW -> 
@@ -148,9 +175,9 @@ let final_game player1 player2 game_state =
 let rec game_loop player1 player2 board = 
 	match check_win board with
 	|WIN X ->
-		final_game player1 player2 (WIN X);
+		final_game player1 player2 (WIN X) board;
 	|WIN O ->
-		final_game player2 player1 (WIN O);
+		final_game player2 player1 (WIN O) board;
 	|CONTINUE ->
 		let is_empty cell =
 			match cell with EMPTY -> true | _ -> false in
@@ -167,7 +194,7 @@ let rec game_loop player1 player2 board =
 		after_turn_board>>= fun at_board ->
 		game_loop player1 player2 at_board
 		
-		|DRAW -> final_game player1 player2 DRAW		
+		|DRAW -> final_game player1 player2 DRAW board		
 
 let waiting_players = 
 	Lwt_mvar.create_empty ()
@@ -176,8 +203,7 @@ let prepare_game_process pair_of_players=
 	pair_of_players >>= fun (player1, player2) ->	
 	send_to_client player1 "You play for X";
 	send_to_client player2 "You play for O";
-	let new_board = Array.copy empty_board in
-	game_loop player1 player2 new_board
+	game_loop player1 player2 empty_board
 
 let rec form_pairs () = 
 	let player1 = Lwt_mvar.take waiting_players in 
