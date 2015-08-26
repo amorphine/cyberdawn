@@ -42,7 +42,8 @@ let read_from_client client=
 let send_to_client client msg=
 	client >>= fun cli->
 	let chan = Lwt_io.(of_fd ~mode:output cli) in
-	Lwt_io.fprintf chan "SERVER MESSAGE: %s\n" msg 
+	Lwt_io.fprintf chan "SERVER MESSAGE: %s\n" msg;
+	Lwt_io.flush chan
 
 let ask_to_wait player = 
 	send_to_client player "Your opponent turn. Please, wait";
@@ -146,12 +147,10 @@ let final_game player1 player2 game_state =
 
 let rec game_loop player1 player2 board = 
 	match check_win board with
-	|WIN X -> 
-		final_game player1 player2;
-		Lwt.return ()
+	|WIN X ->
+		final_game player1 player2 (WIN X);
 	|WIN O ->
-		final_game player2 player1;
-		Lwt.return ()
+		final_game player2 player1 (WIN O);
 	|CONTINUE ->
 		let is_empty cell =
 			match cell with EMPTY -> true | _ -> false in
