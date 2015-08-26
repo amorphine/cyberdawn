@@ -78,7 +78,7 @@ let ask_to_wait player =
 
 let check_if_correct str board = 
 	let cell_is_empty x y board =
-		match Array.get (Array.get board (int_of_string y)) (int_of_string x) with
+		match board.(int_of_string y).(int_of_string x) with
 		EMPTY -> true
 		|_ -> false in		
 	let is_in_board_range coordinate =
