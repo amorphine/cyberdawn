@@ -1,5 +1,20 @@
 open Lwt
+open Lwt_io
 open Str
+open Array
+
+(*
+#use "topfind";;
+
+#require "lwt.simple-top";;
+
+#require "str";;
+
+open Lwt;;
+
+open Str;;
+
+*)
 
 type token  = |X |O |EMPTY
 	
@@ -8,12 +23,30 @@ type game_state = |WIN of token |DRAW |CONTINUE
 let empty_board = [|
 					[|EMPTY; EMPTY; EMPTY|];
 					[|EMPTY; EMPTY; EMPTY|];
-					[|EMPTY; EMPTY; EMPTY|]|]
-					
+					[|EMPTY; EMPTY; EMPTY|]|]					
+
+let sock = Lwt_unix.socket Unix.PF_INET Unix.SOCK_STREAM 0
+
+let setting_up_server_socket = 	
+	let sockaddr = (Unix.ADDR_INET(Unix.inet_addr_of_string "127.0.0.1", 23233)) in
+	Lwt_unix.set_close_on_exec sock;
+	Lwt_unix.setsockopt sock Unix.SO_REUSEADDR true;
+	Lwt_unix.bind sock sockaddr;
+	Lwt_unix.listen sock 20
+
+let read_from_client client= 
+	client >>= fun cli ->
+	let chan = Lwt_io.(of_fd ~mode:input cli) in
+	Lwt_io.read_line chan
+	
+let send_to_client client msg=
+	client >>= fun cli->
+	let chan = Lwt_io.(of_fd ~mode:output cli) in
+	Lwt_io.fprintf chan "SERVER MESSAGE: %s\n" msg 
+
 let ask_to_wait player = 
 	send_to_client player "Your opponent turn. Please, wait";
-	();;
-
+	()
 
 let check_if_correct str board = 
 	let cell_is_empty x y board =
@@ -31,20 +64,20 @@ let check_if_correct str board =
 				cell_is_empty arg1 arg2 board)
 					then true
 					else false
-		| _ -> false;;		
+		| _ -> false		
 
 let make_move x y board token=
 	 board.(y).(x) <- token;
-	 board;;
+	 board
 
-let  rec ask_for_move player board =
+let rec ask_for_move player board =
 	player >>= fun (descriptor, token) ->
 	send_to_client descriptor "Your move: ";
 	let move = read_from_client descriptor in 
 		move >>= fun str ->
 		match (check_if_correct str board) with
 		|false ->
-				send_to_client descriptor "Unknow command. Try again (F.e TURN 1 2)";
+				send_to_client descriptor "Wrong move. Try again (F.e TURN 1 2)";
 				ask_for_move player board;
 		|true ->
 				match  Str.split (Str.regexp " ") str with
@@ -53,7 +86,7 @@ let  rec ask_for_move player board =
 						let y = int_of_string arg2 in
 				let updated_board = 
 					make_move x y board token in 
-				Lwt.return updated_board;;
+				Lwt.return updated_board
 
 let there_are_empty_cells board =
 	let is_empty cell =
@@ -65,34 +98,34 @@ let check_win board =
 	match board with
  | [|[|a; _; _|];
        [|_; b; _|];
-       [|_; _; c|]|] when a = b && b = c -> WIN a
+       [|_; _; c|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
     | [|[|_; _; a|];
        [|_; b; _|];
-       [|c; _; _|]|] when a = b && b = c -> WIN a
+       [|c; _; _|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
 
     | [|[|a; b; c|]; 
        [|_; _; _|];
-       [|_; _; _|]|] when a = b && b = c -> WIN a
+       [|_; _; _|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
     | [|[|_; _; _|];
        [|a; b; c|];
-       [|_; _; _|]|] when a = b && b = c -> WIN a
+       [|_; _; _|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
     | [|[|_; _; _|];
        [|_; _; _|];
-       [|a; b; c|]|] when a = b && b = c -> WIN a
+       [|a; b; c|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
 
     | [|[|a; _; _|];
        [|b; _; _|];
-       [|c; _; _|]|] when a = b && b = c -> WIN a
+       [|c; _; _|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
     | [|[|_; a; _|];
        [|_; b; _|];
-       [|_; c; _|]|] when a = b && b = c -> WIN a
+       [|_; c; _|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
     | [|[|_; _; a|];
        [|_; _; b|];
-       [|_; _; c|]|] when a = b && b = c -> WIN a
+       [|_; _; c|]|] when (a = b && b = c && a <> EMPTY) -> WIN a
        
-    | board when there_are_empty_cells board-> DRAW
+    | board when there_are_empty_cells board-> CONTINUE
 		
-		|	board -> CONTINUE;;
+	|	board -> DRAW
 
 let final_game player1 player2 game_state =
 	let close_channel chan = 
@@ -111,8 +144,7 @@ let final_game player1 player2 game_state =
 		close_channel player1;
 		close_channel player2
 
-let rec game_loop game_variables = 
-	game_variables >>= fun (player1, player2, board) ->
+let rec game_loop player1 player2 board = 
 	match check_win board with
 	|WIN X -> 
 		final_game player1 player2;
@@ -133,15 +165,49 @@ let rec game_loop game_variables =
 						(ask_to_wait player1;
 						Lwt.return (player2, O)) in		
 		let after_turn_board = ask_for_move current_player board in
-		after_turn_board>>= fun board ->
-		game_loop (Lwt.return (player1, player2, board))
+		after_turn_board>>= fun at_board ->
+		game_loop player1 player2 at_board
 		
-		|DRAW -> final_game player1 player2 DRAW;;		
-				
+		|DRAW -> final_game player1 player2 DRAW		
+
+let waiting_players = 
+	Lwt_mvar.create_empty ()
 	
 let prepare_game_process pair_of_players= 
 	pair_of_players >>= fun (player1, player2) ->	
 	send_to_client player1 "You play for X";
 	send_to_client player2 "You play for O";
-	game_loop (Lwt.return (player1, player2, empty_board));;
+	let new_board = Array.copy empty_board in
+	game_loop player1 player2 new_board
+
+let rec form_pairs () = 
+	let player1 = Lwt_mvar.take waiting_players in 
+		player1 >>= fun descriptor1 ->		
+	let player2 = Lwt_mvar.take waiting_players in 
+		player2 >>= fun descriptor2->
+	prepare_game_process (Lwt.return (descriptor1, descriptor2)) |> ignore;
+	form_pairs ()
 	
+let rec make_ready player = 	
+		send_to_client player "Type in START";
+		let answer = read_from_client player in 
+			answer >>= fun str ->
+			match str with
+				|"START" -> 				
+					Lwt_mvar.put waiting_players player;
+					send_to_client player "Looking for opponent";
+				| _ -> 
+					send_to_client player "Unknown command. try again";
+					make_ready player
+
+let rec handle_income () =
+	let in_conection = Lwt_unix.accept sock in 
+	in_conection >>= fun (cli, addr) ->
+	let player = Lwt.return cli in
+	send_to_client player "Welcome to the server. To start game type in START and press Enter";
+	make_ready player;
+	handle_income () 
+
+let _ = 
+	form_pairs ();
+	handle_income ();;
