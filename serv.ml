@@ -1,3 +1,23 @@
+open Lwt
+open Lwt_io
+open Str
+open Array
+
+(*
+#use "topfind";;
+
+#require "lwt.simple-top";;
+
+#require "str";;
+
+open Lwt;;
+
+open Str;;
+
+*)
+
+
+
 type token  = |X |O |EMPTY
 	
 type game_state = |WIN of token |DRAW |CONTINUE
