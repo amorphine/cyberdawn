@@ -162,9 +162,9 @@ let final_game player1 player2 game_state board=
 	match game_state with
 	| WIN X |WIN O ->
 		send_board_to_player player1 board;
-  		send_to_client player1 "You lost!" |> ignore;
+  		send_to_client player1 "You won!" |> ignore;
 		send_board_to_player player2 board;
-  		send_to_client player2 "You won!" |> ignore;		
+  		send_to_client player2 "You lost!" |> ignore;		
 		close_channel player1;
 		close_channel player2
 	|DRAW -> 
