@@ -157,14 +157,21 @@ let check_win board =
 let final_game player1 player2 game_state board=
 	let close_channel chan = 
 		chan >>= fun descriptor ->
-		Lwt_unix.shutdown descriptor SHUTDOWN_ALL;
-		Lwt.return () in
+			Lwt_unix.shutdown descriptor SHUTDOWN_ALL;
+			Lwt.return () in
 	match game_state with
-	| WIN X |WIN O ->
+	| WIN X ->
 		send_board_to_player player1 board;
-  	send_to_client player1 "You won!" |> ignore;
+  		send_to_client player1 "You won!" |> ignore;
 		send_board_to_player player2 board;
-  	send_to_client player2 "You lost!" |> ignore;		
+  		send_to_client player2 "You lost!" |> ignore;		
+		close_channel player1;
+		close_channel player2
+	|WIN O ->
+		send_board_to_player player1 board;
+  		send_to_client player1 "You lost!" |> ignore;
+		send_board_to_player player2 board;
+  		send_to_client player2 "You won!" |> ignore;		
 		close_channel player1;
 		close_channel player2
 	|DRAW -> 
@@ -201,7 +208,7 @@ let rec game_loop player1 player2 board =
 		updated_board >>= fun brd ->
 		game_loop player1 player2 brd;
 		Lwt.return()
-		|DRAW -> final_game player1 player2 DRAW board		
+	|DRAW -> final_game player1 player2 DRAW board		
 
 let waiting_players = 
 	Lwt_mvar.create_empty ()
